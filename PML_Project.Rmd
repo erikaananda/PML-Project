@@ -1,0 +1,93 @@
+---
+title: "Practical Machine Learning Project"
+author: "erikaananda"
+date: "November 22, 2015"
+output: html_document
+---
+#Overview:
+This report summarizes the analysis of the HAR (Humar Activity Recognition) dataset available at http://groupware.les.inf.puc-rio.br/har. This dataset descibes the results from six young healthy participants who were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). The "classe" column captured the class, which this analysis attempts to predict using a training and test set.   
+
+```{r}
+library(caret)
+#setwd("./Documents/Rdata/")
+HARtrain <- read.table ("/Users/erikaananda/Documents/RData/Machine Learning/pml-training.csv",  
+                        sep = ",",header = T)
+HARtest <- read.table ("/Users/erikaananda/Documents/RData/Machine Learning/pml-testing.csv",  
+                       sep = ",",header = T)
+```
+
+First, let's preprocess the data to remove highly correlated, low-value columns
+
+```{r}
+# convert factors to numbers, where misclassified (more than 10 levels, for our data)
+for (i in 2:length(HARtrain[1, ])){
+  if (is.factor(HARtrain[, i])){
+    if (length(levels(HARtrain[, i])) > 10){
+      HARtrain[, i] <- as.numeric(HARtrain[ ,i])
+    }
+  }
+}
+
+# remove redundant features - NA and highly correlated
+x<- NULL
+y <- NULL
+for (i in 1:length(names(HARtrain))){
+  if(is.numeric(HARtrain[, i])){
+    y <- c(y, i)
+    if (! is.na(mean(HARtrain[, i]))) {
+      x <- c(x, i) 
+    }
+  }
+}
+# get only numeric features to find correlation
+numTrain <- (HARtrain[, x])
+numTrain[is.na(numTrain)] <- 0
+corMatrix <- cor(numTrain)
+highCor <- findCorrelation(corMatrix, cutoff = 0.75)
+
+# remove highly correlated features
+numTrain <- numTrain[ , -highCor]
+subTrain <- c(HARtrain[, -y], numTrain)
+subTrain <- data.frame(subTrain)
+
+# get rid of nulls, rowcount
+subTrain <- subTrain[, -(13)]
+subTrain <- subTrain[, -(3:11)]
+```
+
+
+Next, let's find the highest-value features
+
+```{r}
+inTrain <- createDataPartition(y=subTrain$classe, p=0.3, list = F)
+littleTrain <- subTrain[inTrain,]
+littleFit <- train(classe ~ ., method = 'rf', data = littleTrain)
+importance <- varImp(littleFit, scale=FALSE)
+print(importance)
+plot(importance)
+```
+
+Split our data to create a smaller training set with the most important features, 
+and build our model on that smaller set. We want to test the model against the rest of the set,
+to get a better estimate of our out of sample error.
+```{r}
+topTrain <- subTrain[, c(3, 4, 6, 7, 8, 12, 13, 20, 22, 24, 26, 28, 29, 30)]
+inTrain2 <- createDataPartition(y=topTrain$classe, p=0.5, list = F)
+Train <- subTrain[inTrain2,]
+Test <- subTrain[-inTrain2,]
+HARfit <- train(classe ~ ., method = 'rf', data = Train, list=FALSE)
+HARfit
+errTest <- predict(HARfit, newdata=Test)
+table(errTest,Test$classe)
+```
+
+Update the original test set to include important columns, and predict
+```{r}
+keepCols <- !is.na(match(names(HARtest), names(Train)))
+topTest <- HARtest[, keepCols]
+#run prediction
+predict(HARfit, newdata=topTest)
+```
+
+#Conclusions:
+Our random forest model is pretty darn accurate - nearly 99% against our split. Most of the work is done to remove unnecessary variables, and the ones we ended up with work very well. 
